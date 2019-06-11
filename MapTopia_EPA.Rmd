@@ -1,0 +1,230 @@
+---
+fontsize: 14pt
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results="hide")
+date<-as.Date(Sys.time(	), format='%d%b%Y')
+```
+(Last updated: `r date`)  
+
+# __Ecuador and Peru Adventure__
+This shows some fun data for our adventure across __[Ecuador](https://en.wikipedia.org/wiki/Ecuador)__ and __[Peru](https://en.wikipedia.org/wiki/Peru)__ for 58 days in summer of 2019, from Quito to Lima! 
+
+For the interactive map, click a clustered circle until you see blue markers. You can check out each place, by clicking the popup link. (NOTE: If you have a problem opening the link, you can open the link in a new tab by right clicking it)  
+<br>
+<center> <h1><span style="color:#3182bd"> __Wherever we're going, here we come! __ </span></h1> </center>
+<br>
+
+***
+```{r dir}
+setwd("C:/Users/YoonJoung Choi/Dropbox/0 Project/Map")
+```
+
+```{r dataframe_google}
+suppressPackageStartupMessages(library(jsonlite))
+myjson<-fromJSON("Saved places.json")
+jsondta<-as.data.frame(myjson)
+
+dim(jsondta)
+names(jsondta)
+head(jsondta)
+
+geometry<-jsondta[ , 2]
+#str(geometry)
+
+properties<-jsondta[ , 3]
+dim(properties)
+names(properties)
+
+    title<-as.data.frame(properties[ , 4])
+        colnames(title)[1] <- "title"
+
+    url<-as.data.frame(properties[ , 1])
+        colnames(url)[1] <- "url"
+
+    location<-properties[ , 2]
+    dim(location)
+    names(location)
+    
+        geo<-location[ , 4]
+        #str(geo)
+        head(geo)
+    
+        location<-location[ , -4]
+
+    str(title)    
+    str(url)    
+    str(location)
+    str(geo)
+    #confirm there is no nested dataframes
+    
+suppressPackageStartupMessages(library(dplyr))
+dtaset<-bind_cols(title, url, location, geo) 
+
+#check what you have
+colnames(dtaset)<-tolower(names(dtaset))
+head(dtaset)
+names(dtaset)
+
+#clean
+suppressPackageStartupMessages(library(Hmisc))
+dta<- dtaset %>% 
+    rename(country = 'country code') %>% 
+    rename(business = 'business name') %>% 
+    mutate(
+        latitude = ifelse(is.na(latitude)==TRUE, latitude1, latitude) , 
+        longitude = ifelse(is.na(longitude)==TRUE, longitude1, longitude) ,
+        latitude = as.numeric(as.character(latitude)),
+        longitude = as.numeric(as.character(longitude))
+        ) %>% 
+    select( -latitude1, -longitude1) %>% 
+    filter( (latitude<10 & latitude>-14) & longitude<0 ) %>% 
+    filter( country=="PE" | country=="EC" | is.na(country)==TRUE) %>%        filter( title!="Puno, Peru")
+
+#gen link & content 
+dta$link=paste0("<b><a href = ", "'", dta$url, "'", ">")
+dta$content <- paste0(dta$link,dta$title,"</a></b>") 
+
+#Now, check cleaned data. 
+dim(dta)
+head(dta)
+```
+
+```{r dataframe_itinerary}
+suppressPackageStartupMessages(library(dplyr))
+
+#itinerary data
+idta <- as.data.frame(read.csv("itinerary.csv", header=TRUE)) 
+colnames(idta)<-tolower(names(idta))
+
+idta$altitude <- as.numeric(idta$altitude)
+idta$title <- as.character(idta$title)
+idta$date<-as.POSIXct(idta$date, format = "%m/%d/%Y")
+idtadeparture = idta[1,]#Severna Park data
+idta <- idta %>%
+    filter(is.na(date)==FALSE) %>%
+    mutate(
+        lati_y = lag(latitude, n = 1, order_by = date), 
+        long_y = lag(longitude, n = 1, order_by = date))
+dim(idta)
+
+#distance 
+gpsdata<- idta %>% select(longitude, latitude) 
+dim(gpsdata)
+
+suppressPackageStartupMessages(library(geosphere))
+distm<-distm(gpsdata, fun = distHaversine)
+dim(distm)
+
+#add the distance travelled that day to the data.frame
+#idta <- idta %>% filter(date>="2019-07-02")
+idta = idta[-1,]
+idta$dist<-diag(distm[-1,-59])
+idta$dist<-idta$dist*0.000621371 #convert meter to mile
+summary(idta$date)
+
+idta <- idta %>%
+    mutate(
+        newplace = title,
+        newplace=sub(", Ecuador", "", newplace),
+        newplace=sub(", Peru", "", newplace),
+        newplace=sub(", MD, USA", "", newplace),  
+        newplace=sub(", Máncora District", "", newplace), 
+        newplace = ifelse(dist==0, "", newplace) 
+    )
+
+```
+
+```{r altitude, results='asis', comment=FALSE, message=FALSE, warning=FALSE, fig.align='center', fig.width=10, fig.height=4}
+suppressPackageStartupMessages(library(dplyr)) # for `rename`
+suppressPackageStartupMessages(library(tidyr)) # for `gather`
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(cowplot))
+
+#df<-bind_rows(idtadeparture, idta) 
+df <- idta %>%
+    mutate(
+        newplace = ifelse(date=="2019-07-01", "", newplace)   ,
+        newplace = ifelse(date=="2019-08-28", "MD,USA", newplace)   ,
+        newplace = ifelse(date=="2019-07-20", "", newplace),
+        newplace = ifelse(date=="2019-07-23", "", newplace),
+        newplace = ifelse(date=="2019-08-14", "", newplace),
+        newplace = ifelse(date=="2019-08-01", "Cotopoxi", newplace)   ,
+        newplace = ifelse(date=="2019-08-22", "Machu Picchu", newplace)    )     
+
+howhigh<-ggplot(df, aes(date, altitude))+ 
+    geom_line(aes(color="red"))+
+    labs(y="Elevation (ft)", x="")+
+    scale_y_continuous(limit=c(-20, 16000), 
+                       breaks = c(0,5000,10000,15000))+
+    geom_text(aes(label=newplace), size=2.5, angle=20, 
+              position = position_stack(vjust=1.05) ) +
+    ggtitle("HOW HIGH DO WE GO?") +
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          legend.position = "none")
+
+df<-idta[-58, ]
+df <- df %>%
+    mutate(
+        dist = ifelse(date=="2019-07-02", 0, dist), 
+        cumdist = cumsum(dist),
+        newplace = ifelse(dist<40, "", newplace) ,   
+        newplace = ifelse(date=="2019-07-02", "Quito", newplace),
+        newplace = ifelse(newplace=="Cusco", "", newplace),
+        newplace = ifelse(date=="2019-07-20", "", newplace),
+        newplace = ifelse(date=="2019-07-23", "", newplace),
+        newplace = ifelse(date=="2019-08-01", "Cotopoxi", newplace)   ,
+        newplace = ifelse(date=="2019-08-22", "Machu Picchu", newplace)    )    
+
+howfar<-ggplot(df, aes(date, cumdist))+ 
+    geom_line(aes(color="blue"))+
+    labs(y="Cumulative distance travelled (miles)*", x="")+
+    scale_y_continuous(limits = c(0,4000),
+                       breaks = c(1000,2000,3000,4000))+
+    geom_text(aes(label=newplace), size=2.5, angle=0, 
+              position = position_stack(vjust=1.0) ) +
+    ggtitle("HOW FAR DO WE GO?") +
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          legend.position = "none")
+    
+plot_grid(howhigh, howfar, nrow = 1, labels = c("", "", ""))
+```
+
+***
+<center> <h4>__WHERE DO WE GO?__</h4> </center>
+
+```{r map, results='asis', comment=FALSE, message=FALSE, warning=FALSE, fig.align='center', fig.width=10, fig.height=8}
+
+suppressPackageStartupMessages(library(leaflet))
+google<- "http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&s=Ga"
+SmallIcon <- icons( iconWidth = 20, iconHeight = 20)
+dta %>% 
+  leaflet() %>%
+  addTiles(urlTemplate = google) %>%
+  addMarkers(lng = dta$longitude, lat = dta$latitude,
+            clusterOptions = markerClusterOptions(), 
+            icon=SmallIcon, 
+            popup = dta$content)
+```
+
+```{r}
+#![Alt text](/Users/YoonJoung Choi/Dropbox/0 Project/Map/EPAmap.png)
+suppressPackageStartupMessages(library(leaflet))
+google<- "http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&s=Ga"
+dta %>% 
+  leaflet() %>%
+  addTiles(urlTemplate = google) %>%
+  addMarkers(lng = dta$longitude, lat = dta$latitude,
+            clusterOptions = markerClusterOptions(), 
+            label = dta$title,  
+            labelOptions = labelOptions(noHide = T, 
+                                        direction = "bottom",
+                                        style = list(
+                                        "color" = "blue",
+                                        "font-style" = "bold",
+                                        "font-size" = "12px")))
+
+```
+*The shortest distance between two points (i.e., 'as the crow flies'), according to the Haversine method.
